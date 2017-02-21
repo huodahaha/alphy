@@ -13,21 +13,16 @@
 
 #include <time.h>
 
-// todo 需要修改为C实现的红黑树
-#include <map>
+#include "alp_connection.h"
 
-#define PORT 6666
+
+// todo 移动到配置中
 #define LISTENQ 20
-#define EPOLLEVENTS 1024
-#define MAXNCONNS 65536
-
-// 前置定义
-struct connection_t;
+#define EPOLLEVENTS 2048
 
 // poller 
-// 为了防止poller循环引用，明确poller依赖connection
 // 向poller注册事件，修改事件应该是一个对外的接口，connection可以调用poller的方法
-static int poller_add_event(const connection_t *conn);
+static int poller_add_event(connection_t *conn);
 static int poller_add_event(const int epfd, const int fd, const int op, void* cb_data);
 
 static int poller_update_event(connection_t *conn);
@@ -40,149 +35,12 @@ static void process_events(int epfd, epoll_event *events, int n, int listen_fd);
 
 // todo handler中回调connection的cb执行具体逻辑
 static void handle_accept(int epfd, int listen_fd);
-static void handle_read(int epfd, epoll_event *event);
-static void handle_close(int epfd, epoll_event *event);
-static void handle_write(int epfd,epoll_event *event);
-
-// connection相关
-// todo: connection池应该是全局唯一的，所有connection的增删改差都由一个connection池对象决定
-struct buffer_t;
-struct connection_t;
-struct memory_pool_t;
-
-typedef int (*recv_handler)(connection_t* conn);
-
-// 此处为一个定长的buffer，应该有mempool分配，一次分配之后，只有整个connection结束后消失
-// 此外，有可能出现读写buffer满的问题，为解决这个现象，应该由mempool分配一个链表，形成一个可动态增长的块
-struct buffer_t
-{
-    int     len;
-    char    buf[1024];
-};
-
-struct memory_pool_t
-{
-    
-};
-
-// 被动连接
-#define READ_NEED   0x01
-#define WRITE_NEED  0x02
-#define set_read(s) s|=READ_NEED
-#define set_write(s) s|=WRITE_NEED
-#define is_read(s) s&READ_NEED
-#define is_write(s) s&WRITE_NEED
-#define reset_read(s) s&=(~READ_NEED)
-#define reset_write(s) s&=(~WRITE_NEED)
-
-// 用作listen fd的callback data，和connection的第一个值都是fd
-struct acceptor_cb_data_t
-{
-    int fd;
-};
-
-struct connection_t
-{
-    int             fd;
-    int             epfd;
-    
-    memory_pool_t   *mempool;
-    buffer_t        rcv_buf;
-    buffer_t        send_buf;
-
-    recv_handler    handler;    
-
-    int             last_operate;   // 用于链接的超时回收
-    
-    // 由于connection不能向上调用poller层，所以将关注读写状态定义在connection中，有等待poller update
-    int             rw_status;
-};
-
-// todo 应该转移到配置中 
-const int TIMEOUT = 6000; 
-typedef std::map<int, connection_t *>::iterator ITER;
-
-// todo 此处应该实现一个管理链接的对象
-std::map<int, connection_t *> live_connections;
-
-connection_t *alloc_connection(const int epfd, const int fd);
-void update_connection(connection_t *conn);
-void clean_connection(connection_t *conn);
-void clean_timeout_conns();
-
-// 定义测试用回调
-static int echo(connection_t* conn) 
-{
-    //todo 定义装饰器，调用handler时自动update
-    update_connection(conn);
-
-    buffer_t &rcv_buf = conn->rcv_buf;
-    /*printf("echo %.*s\n", rcv_buf.len, rcv_buf.buf); */
-
-    memcpy(conn->send_buf.buf, rcv_buf.buf, rcv_buf.len);
-    conn->send_buf.len = conn->rcv_buf.len;
-    conn->rcv_buf.len = 0;
-    set_write(conn->rw_status);
-    return 0;
-}
-
-// 测试用回调，清除写标志
-/*static int clean_read_flag(connection_t* conn)*/
-/*{*/
-    /*set_read(conn->rw_status);*/
-    /*return 0;*/
-/*};*/
+static void handle_read(epoll_event *event);
+static void handle_close(epoll_event *event);
+static void handle_write(epoll_event *event);
 
 // socket 相关
-static int tcp_listen(int port);
 static void set_nonblock(int fd);
-
-// internal functions
-connection_t *alloc_connection(const int fd, const int epfd)
-{
-    connection_t *conn = (connection_t *)malloc(sizeof(connection_t));
-    if (conn == NULL) return conn;
-   
-    conn->fd = fd;
-    conn->epfd = epfd;
-    // connection的处理回调为echo
-    conn->handler = &echo;
-    live_connections[fd] = conn;
-    update_connection(conn);
-    set_read(conn->rw_status);
-    return conn;
-}
-
-void update_connection(connection_t *conn)
-{
-    int now = time((time_t*)NULL);
-    live_connections[conn->fd]->last_operate = now; 
-}
-
-// 关于socket的释放等，由poller层处理
-void clean_connection(connection_t *conn)
-{
-    ITER iter = live_connections.find(conn->fd);
-    if (iter != live_connections.end()){
-        // todo 回收内存
-        live_connections.erase(iter);        
-    }
-    // 回收connection 结构体空间，todo 将失效connection返回给内存池
-    free(conn); 
-}
-
-void clean_timeout_conns()
-{ 
-    int now = time((time_t*)NULL);
-    for (ITER iter = live_connections.begin(); 
-            iter != live_connections.end(); iter++)
-    {
-        if(iter->second->last_operate - now > TIMEOUT){
-            // time out
-            clean_connection(iter->second);
-        }
-    }
-}
 
 int tcp_listen(int port)
 {
@@ -418,7 +276,6 @@ void handle_write(epoll_event *event)
 
 void process_events(int epfd, epoll_event *events, int n, int listen_fd)
 {
-    int fd;
     for(int i=0; i<n; i++)
     {
         void* conn = events[i].data.ptr; 
@@ -448,7 +305,6 @@ void process_events(int epfd, epoll_event *events, int n, int listen_fd)
     }
 }
 
-
 void epoll_loop(int listen_fd)
 {
     int epfd,nready;
@@ -473,15 +329,3 @@ void epoll_loop(int listen_fd)
     free(events);
     close(epfd);
 }
-
-
-int main()
-{
-    int listen_fd;
-
-    listen_fd=tcp_listen(PORT);
-    epoll_loop(listen_fd);
-
-    return 0;
-}
-
