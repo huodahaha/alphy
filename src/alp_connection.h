@@ -5,7 +5,7 @@
 // todo: connection池应该是全局唯一的，所有connection的增删改差都由一个connection池对象决定
 struct buffer_t;
 struct connection_t;
-struct memory_pool_t;
+struct mempool_t;
 
 typedef int (*recv_handler)(connection_t* conn);
 
@@ -15,11 +15,6 @@ struct buffer_t
 {
     int     len;
     char    buf[1024];
-};
-
-struct memory_pool_t
-{
-    
 };
 
 // 被动连接
@@ -46,7 +41,7 @@ struct connection_t
     int             fd;
     int             epfd;
     
-    memory_pool_t   *mempool;
+    mempool_t       *mempool;
     buffer_t        rcv_buf;
     buffer_t        send_buf;
 

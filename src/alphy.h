@@ -2,6 +2,8 @@
 #define ALPHY_H
 
 #include "stddef.h"
+#include "stdbool.h"
+#include "errorcode.h"
 
 // Check GCC
 #if __GNUC__
@@ -30,5 +32,14 @@
 
 #define min(a,b) a<b?a:b
 #define max(a,b) a>b?a:b
+
+typedef struct mempool_data_t mempool_data_t;
+typedef struct mempool_t mempool_t;
+typedef struct mempool_large_t mempool_large_t; 
+typedef struct ring_buf_t ring_buf_t;
+
+
+#define DEBUG_MEMPOOL
+#define DEBUG_RINGBUFFER
 
 #endif 

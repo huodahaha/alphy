@@ -1,19 +1,24 @@
 #ifndef R_BUF_H
 #define R_BUF_H
 
+#include "alphy.h"
+
 typedef struct ring_buf_t
 {
-    unsigned int r;
-    unsigned int w;
+    size_t      r;
+    size_t      w;
 
-    char*  buf;
-    unsigned int buf_size;
+    uchar_8     *buf;
+    size_t      buf_size;
+
+    mempool_t   *mempool;
 } ring_buf_t;
 
-// ring buffer不负责内存的管理
-ring_buf_t *rbuf_init(unsigned int size, char *buf);
+// ring buffer 可以从mempool中分配,也可通过一段申请好的内存进行创建
+// 通过mempool分配的ring buffer可以自增
+ring_buf_t *rbuf_init(size_t size, mempool_t *mempool, uchar_8 *raw_buf);
 void* rbuf_fini(ring_buf_t *rbuf);
 
-unsigned int rbuf_put(ring_buf_t *rbuf, const void *buf, unsigned int len);
-unsigned int rbuf_get(ring_buf_t *rbuf, void *buf, unsigned int len);
+size_t rbuf_put(ring_buf_t *rbuf, const void *buf, size_t len);
+size_t rbuf_get(ring_buf_t *rbuf, void *buf, size_t len);
 #endif

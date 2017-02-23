@@ -4,11 +4,7 @@
 // size_t
 #include "alphy.h"
 
-typedef struct mempool_data_t mempool_data_t;
-typedef struct mempool_t mempool_t;
-typedef struct mempool_large_t mempool_large_t; 
-
-#define MAX_ALLOC_FROM_POOL 1024
+#define MAX_ALLOC_FROM_POOL 2048
 
 struct mempool_data_t
 {
